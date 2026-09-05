@@ -39,41 +39,54 @@ if "hint" not in st.session_state:
 def generate_word_for_level(level):
     """Fetch a word and hint from Groq Llama 3 API based on game level."""
     prompt = f"""
-    Generate a single English word suitable for level {level} of a word game.
-    Higher levels must feature longer or more complex words.
-    Return strictly raw JSON format without markdown blocks like:
-    {{"word": "EXAMPLE", "hint": "A short clue about the word"}}
+    You are generating words for a word scramble game level {level}.
+    - Level 1-3: Easy 4-5 letter common words.
+    - Level 4-7: Medium 6-7 letter words.
+    - Level 8+: Hard 8+ letter words.
+
+    Return ONLY a JSON object with keys "word" and "hint".
+    Example output: {{"word": "PLANET", "hint": "A large celestial body orbiting a star"}}
     """
     try:
         response = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.1-8b-instant",
-            temperature=0.7,
+            temperature=0.8,
+            response_format={"type": "json_object"}  # Forces Groq to return pure JSON
         )
         content = response.choices[0].message.content.strip()
-        
-        # Strip markdown json blocks if returned
-        if content.startswith("```"):
-            content = content.split("```")[1].replace("json", "").strip()
-            
         data = json.loads(content)
-        word = data["word"].upper().strip()
-        hint = data["hint"].strip()
-        return word, hint
-    except Exception:
-        # Fallback words if API fails or rate limit hits
-        fallbacks = [("PYTHON", "A popular coding language"), ("STREAMLIT", "Python framework for web apps")]
-        return random.choice(fallbacks)
+        
+        word = str(data.get("word", "")).upper().strip()
+        hint = str(data.get("hint", "")).strip()
+
+        # Simple check to ensure valid output from API
+        if word and hint and len(word) >= 3:
+            return word, hint
+        else:
+            raise ValueError("Invalid format received")
+
+    except Exception as e:
+        # Emergency backup words if API fails
+        backup_words = [
+            ("GALAXY", "A system of millions or billions of stars"),
+            ("COMPUTER", "An electronic device for processing data"),
+            ("CREED", "A system of religious belief or faith"),
+            ("PUZZLE", "A game designed to test ingenuity")
+        ]
+        return random.choice(backup_words)
 
 def scramble_word(word):
     """Scramble the characters in a word."""
     letters = list(word)
-    while len(letters) > 1:
+    if len(letters) <= 1:
+        return word
+    for _ in range(10):
         random.shuffle(letters)
         scrambled = "".join(letters)
         if scrambled != word:
             return scrambled
-    return word
+    return "".join(letters)
 
 def setup_new_round():
     """Load a new word for the current level."""
@@ -96,6 +109,7 @@ st.sidebar.metric("Total Score", st.session_state.score)
 if st.sidebar.button("Restart Game"):
     st.session_state.level = 1
     st.session_state.score = 0
+    st.session_state.current_word = None
     setup_new_round()
     st.rerun()
 
@@ -123,5 +137,6 @@ if submit_button:
         st.error(f"❌ Wrong answer! The correct word was **{st.session_state.current_word}**.")
         st.warning("Game Over! Resetting back to Level 1.")
         st.session_state.level = 1
+        st.session_state.score = 0
         setup_new_round()
         st.rerun()
